@@ -1,0 +1,56 @@
+esphome:
+  name: oil-tank-monitor
+  friendly_name: Oil Tank Monitor
+
+esp32:
+  board: esp32dev
+
+# Enable logging
+logger:
+
+# Enable Home Assistant API
+api:
+
+ota:
+  platform: esphome
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+  ap:
+    ssid: "Oil-Tank-Monitor"
+    password: !secret ap_password
+
+captive_portal:
+
+# Load the Magnus HAWKi component
+external_components:
+  - source: github://denislooby/esphome-magnus-hawki
+    components: [magnus_hawki]
+
+# BLE tracker and client
+esp32_ble_tracker:
+
+ble_client:
+  - mac_address: "XX:XX:XX:XX:XX:XX"  # Replace with your Magnus HAWKi MAC
+    id: hawki_ble
+
+# Magnus HAWKi hub
+magnus_hawki:
+  ble_client_id: hawki_ble
+  tank_height: 320       # mm - from your device config (characteristic 1991)
+  update_interval: 3600s # How often to trigger a new measurement (default: 1 hour)
+
+# Sensors
+sensor:
+  - platform: magnus_hawki
+    distance:
+      name: "Oil Tank Distance"
+    level:
+      name: "Oil Tank Level"
+
+text_sensor:
+  - platform: magnus_hawki
+    timestamp:
+      name: "Oil Tank Last Reading"

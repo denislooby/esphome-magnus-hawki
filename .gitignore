@@ -1,0 +1,20 @@
+# ESPHome build artifacts
+.esphome/
+*.bin
+*.elf
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
