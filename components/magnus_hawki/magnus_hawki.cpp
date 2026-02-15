@@ -13,18 +13,18 @@ namespace magnus_hawki {
 static const char *const TAG = "magnus_hawki";
 
 // Service UUIDs
-static const espbt::ESPBTUUID SERVICE_MAIN =
-    espbt::ESPBTUUID::from_raw("00001923-1322-ffdd-3533-886fdadce133");
-static const espbt::ESPBTUUID SERVICE_DATA =
-    espbt::ESPBTUUID::from_raw("00002010-1322-ffdd-3533-886fdadce133");
+static const esp32_ble_tracker::ESPBTUUID SERVICE_MAIN =
+    esp32_ble_tracker::ESPBTUUID::from_raw("00001923-1322-ffdd-3533-886fdadce133");
+static const esp32_ble_tracker::ESPBTUUID SERVICE_DATA =
+    esp32_ble_tracker::ESPBTUUID::from_raw("00002010-1322-ffdd-3533-886fdadce133");
 
 // Characteristic UUIDs (short form within their service)
-static const espbt::ESPBTUUID CHAR_TRIGGER =
-    espbt::ESPBTUUID::from_raw("00001960-1322-ffdd-3533-886fdadce133");
-static const espbt::ESPBTUUID CHAR_RESULT =
-    espbt::ESPBTUUID::from_raw("00002014-1322-ffdd-3533-886fdadce133");
-static const espbt::ESPBTUUID CHAR_TIMESTAMP =
-    espbt::ESPBTUUID::from_raw("00001993-1322-ffdd-3533-886fdadce133");
+static const esp32_ble_tracker::ESPBTUUID CHAR_TRIGGER =
+    esp32_ble_tracker::ESPBTUUID::from_raw("00001960-1322-ffdd-3533-886fdadce133");
+static const esp32_ble_tracker::ESPBTUUID CHAR_RESULT =
+    esp32_ble_tracker::ESPBTUUID::from_raw("00002014-1322-ffdd-3533-886fdadce133");
+static const esp32_ble_tracker::ESPBTUUID CHAR_TIMESTAMP =
+    esp32_ble_tracker::ESPBTUUID::from_raw("00001993-1322-ffdd-3533-886fdadce133");
 
 void MagnusHawki::setup() {
   ESP_LOGCONFIG(TAG, "Setting up Magnus HAWKi...");
@@ -40,7 +40,7 @@ void MagnusHawki::dump_config() {
 }
 
 void MagnusHawki::update() {
-  if (this->node_state != espbt::ClientState::ESTABLISHED) {
+  if (this->node_state != esp32_ble_tracker::ClientState::ESTABLISHED) {
     ESP_LOGD(TAG, "Not connected, skipping update");
     return;
   }
@@ -152,7 +152,7 @@ void MagnusHawki::gattc_event_handler(esp_gattc_cb_event_t event,
         }
       } else if (param->reg_for_notify.handle == this->trigger_handle_) {
         ESP_LOGI(TAG, "Registered for trigger notifications (1960) - measurement started");
-        this->node_state = espbt::ClientState::ESTABLISHED;
+        this->node_state = esp32_ble_tracker::ClientState::ESTABLISHED;
       }
       break;
     }

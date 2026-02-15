@@ -8,8 +8,6 @@
 
 #ifdef USE_ESP32
 
-namespace espbt = esphome::esp32_ble_tracker;
-
 namespace esphome {
 namespace magnus_hawki {
 
