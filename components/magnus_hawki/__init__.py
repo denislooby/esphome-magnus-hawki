@@ -5,7 +5,7 @@ from esphome.const import CONF_ID
 
 DEPENDENCIES = ["ble_client"]
 CODEOWNERS = ["@denislooby"]
-AUTO_LOAD = ["sensor", "text_sensor"]
+AUTO_LOAD = ["sensor", "text_sensor", "button"]
 
 CONF_MAGNUS_HAWKI_ID = "magnus_hawki_id"
 CONF_TANK_HEIGHT = "tank_height"

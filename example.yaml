@@ -37,10 +37,12 @@ ble_client:
     id: hawki_ble
 
 # Magnus HAWKi hub
+# Connects every 4 hours to read cached data, then disconnects.
+# Use the "measure" button in HA to trigger a fresh radar measurement.
 magnus_hawki:
   ble_client_id: hawki_ble
   tank_height: 320       # mm - from your device config (characteristic 1991)
-  update_interval: 14400s # How often to trigger a new measurement (default: 4 hours)
+  update_interval: 14400s # How often to read cached data (default: 4 hours)
 
 # Sensors
 sensor:
@@ -54,3 +56,9 @@ text_sensor:
   - platform: magnus_hawki
     timestamp:
       name: "Oil Tank Last Reading"
+
+# Button to trigger a fresh radar measurement on demand
+button:
+  - platform: magnus_hawki
+    measure:
+      name: "Oil Tank Measure Now"
