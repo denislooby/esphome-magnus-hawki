@@ -41,7 +41,8 @@ ble_client:
 # Use the "measure" button in HA to trigger a fresh radar measurement.
 magnus_hawki:
   ble_client_id: hawki_ble
-  tank_height: 320       # mm - from your device config (characteristic 1991)
+  tank_height: 1040      # mm - distance from sensor to outflow pipe (usable depth)
+  offset: 0              # mm - distance from sensor to tank top (0 if flush-mounted)
   update_interval: 14400s # How often to read cached data (default: 4 hours)
 
 # Sensors

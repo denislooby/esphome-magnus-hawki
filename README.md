@@ -35,7 +35,8 @@ ble_client:
 
 magnus_hawki:
   ble_client_id: hawki_ble
-  tank_height: 320
+  tank_height: 1040      # mm - distance from sensor to outflow pipe
+  offset: 0              # mm - distance from sensor to tank top (0 if flush)
   update_interval: 14400s
 
 sensor:
@@ -49,6 +50,11 @@ text_sensor:
   - platform: magnus_hawki
     timestamp:
       name: "Oil Tank Last Reading"
+
+button:
+  - platform: magnus_hawki
+    measure:
+      name: "Oil Tank Measure Now"
 ```
 
 ### Configuration Variables
@@ -58,8 +64,9 @@ text_sensor:
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `ble_client_id` | Yes | - | ID of the `ble_client` connected to your HAWKi |
-| `tank_height` | No | - | Tank height in mm (needed for level % calculation) |
-| `update_interval` | No | `14400s` | How often to trigger a new measurement (4 hours) |
+| `tank_height` | No | - | Distance from sensor to outflow pipe in mm (usable oil depth) |
+| `offset` | No | `0` | Distance from sensor to tank top in mm (0 if flush-mounted) |
+| `update_interval` | No | `14400s` | How often to read cached data (4 hours) |
 
 **Sensor Platform**
 
@@ -87,29 +94,35 @@ The Magnus HAWKi advertises as `Magnus-{ID}-{suffix}`. To find the MAC address:
 2. Check the ESPHome logs for a device starting with `Magnus-`
 3. Or use nRF Connect app on your phone to scan for nearby BLE devices
 
-## Tank Height Configuration
+## Tank Calibration
 
-The `tank_height` value is the total distance (in mm) from the radar sensor to the bottom of the tank when empty. You can find this from:
+These match the values you set during Magnus app setup:
 
-- **Characteristic `1991`** on the device (read via nRF Connect): contains two values, the second being tank height in mm
-- **The Magnus app**: check your tank configuration settings
-- **Physical measurement**: measure from sensor mounting point to tank bottom
+- **`offset`**: Distance from the sensor to the top of the tank opening (in mm). Set to `0` if the sensor is flush-mounted at the tank top.
+- **`tank_height`**: Distance from the sensor down to the outflow pipe (in mm). This is the usable oil depth — the distance the oil can fill from outflow pipe up to the sensor.
 
-The level percentage is calculated as: `level = ((tank_height - distance) / tank_height) * 100`
+The level percentage is calculated as: `level = ((tank_height - (distance - offset)) / tank_height) * 100`
+
+For example, with `offset: 0` and `tank_height: 1040`, a distance reading of 95mm gives: `(1040 - 95) / 1040 = 90.9%`
 
 ## How It Works
 
-The component uses the HAWKi's BLE notification protocol:
+The component operates in two modes to preserve the HAWKi's CR123A battery:
 
+**Normal mode (periodic cache read):**
 1. **Connect** to the HAWKi via `ble_client`
-2. **Subscribe** to characteristic `2014` (result notifications)
-3. **Subscribe** to characteristic `1960` (triggers the radar measurement)
-4. The device runs through states `01` -> `02` -> `05` (measuring)
-5. **Receive** the result on `2014` as ASCII: `distance_mid  135/0`
-6. **Parse** the distance value and calculate level percentage
-7. **Read** characteristic `1993` for the measurement timestamp
+2. **Read** characteristic `1962` for the cached measurement
+3. **Read** characteristic `1993` for the timestamp
+4. **Disconnect** immediately (~3 seconds total)
 
-No authentication or bonding is required.
+**Fresh measurement (via button press in HA):**
+1. **Connect** and subscribe to `1969` (debug log — required for radar to power on)
+2. **Subscribe** to `2014` (result) then `1960` (trigger)
+3. The device runs through states `01` -> `02` -> `05` (~6 seconds)
+4. **Receive** the result on `2014` as ASCII: `distance_mid  135/0`
+5. **Read** timestamp from `1993`, then **disconnect**
+
+The component disconnects after each operation so the Magnus app can connect normally. No authentication or bonding is required.
 
 ## Troubleshooting
 
@@ -144,7 +157,8 @@ No authentication or bonding is required.
 | `1960` | `00001923-...` | Notify | Measurement trigger (01->02->05) |
 | `2014` | `00002010-...` | Notify | Result: `distance_mid  {mm}/{status}` |
 | `1993` | `00001923-...` | Read | Timestamp: `DD.MM.YYYY HH:MM:SS` |
-| `1962` | `00001923-...` | Read | Raw radar reference data (not oil level) |
+| `1962` | `00001923-...` | Read | Cached measurement: `{dist} {n} {ref} {status}` |
+| `1969` | `00001923-...` | Notify | Debug log stream (must subscribe for radar to run) |
 | `1991` | `00001923-...` | Read | Tank dimensions (height in mm) |
 
 For the complete BLE characteristic map, see [magnus-hawki-ble.md](https://github.com/denislooby/esphome-magnus-hawki/blob/main/docs/ble-protocol.md).

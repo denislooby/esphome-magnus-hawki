@@ -39,6 +39,7 @@ void MagnusHawki::setup() {
 void MagnusHawki::dump_config() {
   ESP_LOGCONFIG(TAG, "Magnus HAWKi:");
   ESP_LOGCONFIG(TAG, "  Tank Height: %.0f mm", this->tank_height_);
+  ESP_LOGCONFIG(TAG, "  Sensor Offset: %.0f mm", this->offset_);
   ESP_LOGCONFIG(TAG, "  Mode: cache read (button for fresh measurement)");
   LOG_SENSOR("  ", "Distance", this->distance_sensor_);
   LOG_SENSOR("  ", "Level", this->level_sensor_);
@@ -337,10 +338,12 @@ void MagnusHawki::parse_distance_(const uint8_t *data, uint16_t length, bool fro
   }
 
   if (this->level_sensor_ != nullptr && this->tank_height_ > 0) {
-    float level = ((this->tank_height_ - distance) / this->tank_height_) * 100.0f;
+    float oil_depth = this->tank_height_ - (distance - this->offset_);
+    float level = (oil_depth / this->tank_height_) * 100.0f;
     if (level < 0.0f) level = 0.0f;
     if (level > 100.0f) level = 100.0f;
-    ESP_LOGI(TAG, "Oil level: %.1f%%", level);
+    ESP_LOGI(TAG, "Oil level: %.1f%% (depth=%.0fmm, tank=%.0fmm, offset=%.0fmm)",
+             level, oil_depth, this->tank_height_, this->offset_);
     this->level_sensor_->publish_state(level);
   }
 }

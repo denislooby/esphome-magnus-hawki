@@ -37,6 +37,7 @@ class MagnusHawki : public PollingComponent, public ble_client::BLEClientNode {
   void set_level_sensor(sensor::Sensor *sensor) { this->level_sensor_ = sensor; }
   void set_timestamp_sensor(text_sensor::TextSensor *sensor) { this->timestamp_sensor_ = sensor; }
   void set_tank_height(float height) { this->tank_height_ = height; }
+  void set_offset(float offset) { this->offset_ = offset; }
 
   /// Called by the button to trigger a fresh radar measurement
   void trigger_fresh_measurement();
@@ -58,6 +59,7 @@ class MagnusHawki : public PollingComponent, public ble_client::BLEClientNode {
   uint16_t debug_handle_{0};     // 1969
 
   float tank_height_{0};
+  float offset_{0};
   OpMode mode_{OpMode::IDLE};
   bool fresh_measure_requested_{false};
   uint32_t operation_start_time_{0};
