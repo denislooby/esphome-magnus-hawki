@@ -36,7 +36,7 @@ ble_client:
 magnus_hawki:
   ble_client_id: hawki_ble
   tank_height: 320
-  update_interval: 3600s
+  update_interval: 14400s
 
 sensor:
   - platform: magnus_hawki
@@ -59,7 +59,7 @@ text_sensor:
 |---|---|---|---|
 | `ble_client_id` | Yes | - | ID of the `ble_client` connected to your HAWKi |
 | `tank_height` | No | - | Tank height in mm (needed for level % calculation) |
-| `update_interval` | No | `3600s` | How often to trigger a new measurement |
+| `update_interval` | No | `14400s` | How often to trigger a new measurement (4 hours) |
 
 **Sensor Platform**
 
@@ -128,8 +128,14 @@ No authentication or bonding is required.
 - Distance increases as oil level drops (sensor is at the top)
 
 **Stale readings:**
-- The default `update_interval` is 1 hour to preserve battery life
-- Reduce it for more frequent readings, but this will drain the CR123A faster
+- The default `update_interval` is 4 hours to preserve battery life (CR123A)
+- Reduce it for more frequent readings, but this will drain the battery faster
+- Each measurement cycle takes ~5-6 seconds of BLE activity
+
+**Distance shows 99999:**
+- This means the radar detected no target (empty tank or sensor not aimed correctly)
+- The component will log a warning and skip publishing to avoid bogus HA values
+- Check sensor alignment and battery level
 
 ## BLE Protocol Reference
 

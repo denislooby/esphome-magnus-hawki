@@ -40,7 +40,7 @@ ble_client:
 magnus_hawki:
   ble_client_id: hawki_ble
   tank_height: 320       # mm - from your device config (characteristic 1991)
-  update_interval: 3600s # How often to trigger a new measurement (default: 1 hour)
+  update_interval: 14400s # How often to trigger a new measurement (default: 4 hours)
 
 # Sensors
 sensor:

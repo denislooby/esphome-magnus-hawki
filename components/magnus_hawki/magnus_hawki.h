@@ -41,6 +41,8 @@ class MagnusHawki : public PollingComponent, public ble_client::BLEClientNode {
 
   float tank_height_{0};
   bool measurement_pending_{false};
+  uint32_t measurement_start_time_{0};
+  static const uint32_t MEASUREMENT_TIMEOUT_MS = 30000;  // 30s timeout
 };
 
 }  // namespace magnus_hawki

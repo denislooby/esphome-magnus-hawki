@@ -24,7 +24,7 @@ CONFIG_SCHEMA = (
             cv.Optional(CONF_TANK_HEIGHT): cv.positive_float,
         }
     )
-    .extend(cv.polling_component_schema("3600s"))
+    .extend(cv.polling_component_schema("14400s"))
     .extend(ble_client.BLE_CLIENT_SCHEMA)
 )
 

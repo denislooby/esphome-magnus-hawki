@@ -46,8 +46,14 @@ void MagnusHawki::update() {
   }
 
   if (this->measurement_pending_) {
-    ESP_LOGD(TAG, "Measurement already pending, skipping");
-    return;
+    uint32_t elapsed = millis() - this->measurement_start_time_;
+    if (elapsed > MEASUREMENT_TIMEOUT_MS) {
+      ESP_LOGW(TAG, "Measurement timed out after %u ms, resetting", elapsed);
+      this->measurement_pending_ = false;
+    } else {
+      ESP_LOGD(TAG, "Measurement already pending (%u ms elapsed), skipping", elapsed);
+      return;
+    }
   }
 
   // The HAWKi triggers a measurement when a client subscribes to 1960.
@@ -57,9 +63,8 @@ void MagnusHawki::update() {
     esp_ble_gattc_unregister_for_notify(
         this->parent()->get_gattc_if(), this->parent()->get_remote_bda(),
         this->trigger_handle_);
-    // The re-subscribe happens after unregister completes (in UNREG_FOR_NOTIFY_EVT)
-    // but we can also just re-register immediately — the ESP stack handles ordering.
     this->measurement_pending_ = true;
+    this->measurement_start_time_ = millis();
     auto status = esp_ble_gattc_register_for_notify(
         this->parent()->get_gattc_if(), this->parent()->get_remote_bda(),
         this->trigger_handle_);
@@ -142,6 +147,7 @@ void MagnusHawki::gattc_event_handler(esp_gattc_cb_event_t event,
         // Now register for trigger notifications (1960) to start measurement
         if (this->trigger_handle_ != 0) {
           this->measurement_pending_ = true;
+          this->measurement_start_time_ = millis();
           auto status = esp_ble_gattc_register_for_notify(
               this->parent()->get_gattc_if(), this->parent()->get_remote_bda(),
               this->trigger_handle_);
@@ -219,6 +225,11 @@ void MagnusHawki::parse_distance_(const uint8_t *data, uint16_t length) {
   float distance = std::strtof(distance_str.c_str(), &end);
   if (end == distance_str.c_str()) {
     ESP_LOGW(TAG, "Could not parse distance value: '%s'", distance_str.c_str());
+    return;
+  }
+
+  if (distance >= 99999.0f) {
+    ESP_LOGW(TAG, "No radar target detected (distance=%.0f), skipping publish", distance);
     return;
   }
 
