@@ -2,10 +2,13 @@
 
 #include "esphome/core/component.h"
 #include "esphome/components/ble_client/ble_client.h"
+#include "esphome/components/esp32_ble_tracker/esp32_ble_tracker.h"
 #include "esphome/components/sensor/sensor.h"
 #include "esphome/components/text_sensor/text_sensor.h"
 
 #ifdef USE_ESP32
+
+namespace espbt = esphome::esp32_ble_tracker;
 
 namespace esphome {
 namespace magnus_hawki {
