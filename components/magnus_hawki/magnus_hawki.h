@@ -66,6 +66,10 @@ class MagnusHawki : public PollingComponent, public ble_client::BLEClientNode {
   static const uint32_t OPERATION_TIMEOUT_MS = 30000;
 
   int cache_reads_pending_{0};  // Track outstanding reads
+  bool has_value_{false};       // True after first successful read
+  uint8_t boot_retry_count_{0}; // Retries on boot until first value
+  static const uint8_t MAX_BOOT_RETRIES = 3;
+  static const uint32_t BOOT_RETRY_DELAY_MS = 30000;
 };
 
 /// Button that triggers a fresh radar measurement

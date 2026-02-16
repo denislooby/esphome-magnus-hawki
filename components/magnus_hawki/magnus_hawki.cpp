@@ -100,6 +100,14 @@ void MagnusHawki::gattc_event_handler(esp_gattc_cb_event_t event,
         ESP_LOGW(TAG, "Connection failed, status=%d", param->open.status);
         this->mode_ = OpMode::IDLE;
         this->parent()->set_enabled(false);
+
+        // Retry on boot until we get the first valid reading
+        if (!this->has_value_ && this->boot_retry_count_ < MAX_BOOT_RETRIES) {
+          this->boot_retry_count_++;
+          ESP_LOGI(TAG, "No values yet, scheduling retry %d/%d in 30s",
+                   this->boot_retry_count_, MAX_BOOT_RETRIES);
+          this->set_timeout("boot_retry", BOOT_RETRY_DELAY_MS, [this]() { this->update(); });
+        }
       }
       break;
     }
@@ -332,6 +340,7 @@ void MagnusHawki::parse_distance_(const uint8_t *data, uint16_t length, bool fro
   }
 
   ESP_LOGI(TAG, "Oil distance: %.0f mm (%s)", distance, from_cache ? "cached" : "fresh");
+  this->has_value_ = true;
 
   if (this->distance_sensor_ != nullptr) {
     this->distance_sensor_->publish_state(distance);
