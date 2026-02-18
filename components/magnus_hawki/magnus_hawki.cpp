@@ -5,6 +5,7 @@
 #include "esphome/core/log.h"
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <string>
 
 namespace esphome {
@@ -23,8 +24,6 @@ static const esp32_ble_tracker::ESPBTUUID CHAR_TRIGGER =
     esp32_ble_tracker::ESPBTUUID::from_raw("00001960-1322-ffdd-3533-886fdadce133");
 static const esp32_ble_tracker::ESPBTUUID CHAR_RESULT =
     esp32_ble_tracker::ESPBTUUID::from_raw("00002014-1322-ffdd-3533-886fdadce133");
-static const esp32_ble_tracker::ESPBTUUID CHAR_TIMESTAMP =
-    esp32_ble_tracker::ESPBTUUID::from_raw("00001993-1322-ffdd-3533-886fdadce133");
 static const esp32_ble_tracker::ESPBTUUID CHAR_CACHED =
     esp32_ble_tracker::ESPBTUUID::from_raw("00001962-1322-ffdd-3533-886fdadce133");
 static const esp32_ble_tracker::ESPBTUUID CHAR_DEBUG =
@@ -43,7 +42,7 @@ void MagnusHawki::dump_config() {
   ESP_LOGCONFIG(TAG, "  Mode: cache read (button for fresh measurement)");
   LOG_SENSOR("  ", "Distance", this->distance_sensor_);
   LOG_SENSOR("  ", "Level", this->level_sensor_);
-  LOG_TEXT_SENSOR("  ", "Timestamp", this->timestamp_sensor_);
+  LOG_TEXT_SENSOR("  ", "Last Read", this->last_read_sensor_);
   LOG_UPDATE_INTERVAL(this);
 }
 
@@ -89,6 +88,17 @@ void MagnusHawki::trigger_fresh_measurement() {
   this->update();
 }
 
+void MagnusHawki::trigger_cache_read() {
+  if (this->mode_ != OpMode::IDLE) {
+    ESP_LOGW(TAG, "Cannot read cache - operation already in progress");
+    return;
+  }
+  ESP_LOGI(TAG, "Cache read requested via button");
+  this->mode_ = OpMode::CACHE_CONNECT;
+  this->operation_start_time_ = millis();
+  this->parent()->set_enabled(true);
+}
+
 void MagnusHawki::gattc_event_handler(esp_gattc_cb_event_t event,
                                        esp_gatt_if_t gattc_if,
                                        esp_ble_gattc_cb_param_t *param) {
@@ -101,12 +111,15 @@ void MagnusHawki::gattc_event_handler(esp_gattc_cb_event_t event,
         this->mode_ = OpMode::IDLE;
         this->parent()->set_enabled(false);
 
-        // Retry on boot until we get the first valid reading
-        if (!this->has_value_ && this->boot_retry_count_ < MAX_BOOT_RETRIES) {
-          this->boot_retry_count_++;
-          ESP_LOGI(TAG, "No values yet, scheduling retry %d/%d in 30s",
-                   this->boot_retry_count_, MAX_BOOT_RETRIES);
-          this->set_timeout("boot_retry", BOOT_RETRY_DELAY_MS, [this]() { this->update(); });
+        // Retry on connection failure
+        if (this->retry_count_ < MAX_RETRIES) {
+          this->retry_count_++;
+          ESP_LOGI(TAG, "Scheduling retry %d/%d in 30s",
+                   this->retry_count_, MAX_RETRIES);
+          this->set_timeout("retry", RETRY_DELAY_MS, [this]() { this->update(); });
+        } else {
+          ESP_LOGW(TAG, "Max retries reached, waiting for next update cycle");
+          this->retry_count_ = 0;
         }
       }
       break;
@@ -116,10 +129,8 @@ void MagnusHawki::gattc_event_handler(esp_gattc_cb_event_t event,
       ESP_LOGD(TAG, "Disconnected from Magnus HAWKi");
       this->trigger_handle_ = 0;
       this->result_handle_ = 0;
-      this->timestamp_handle_ = 0;
       this->cached_handle_ = 0;
       this->debug_handle_ = 0;
-      this->cache_reads_pending_ = 0;
       if (this->mode_ != OpMode::IDLE) {
         this->mode_ = OpMode::IDLE;
       }
@@ -138,9 +149,6 @@ void MagnusHawki::gattc_event_handler(esp_gattc_cb_event_t event,
       auto *result_chr = this->parent()->get_characteristic(SERVICE_DATA, CHAR_RESULT);
       if (result_chr != nullptr) this->result_handle_ = result_chr->handle;
 
-      auto *timestamp_chr = this->parent()->get_characteristic(SERVICE_MAIN, CHAR_TIMESTAMP);
-      if (timestamp_chr != nullptr) this->timestamp_handle_ = timestamp_chr->handle;
-
       auto *cached_chr = this->parent()->get_characteristic(SERVICE_MAIN, CHAR_CACHED);
       if (cached_chr != nullptr) this->cached_handle_ = cached_chr->handle;
 
@@ -151,24 +159,12 @@ void MagnusHawki::gattc_event_handler(esp_gattc_cb_event_t event,
         // === CACHE READ MODE ===
         ESP_LOGI(TAG, "Reading cached measurement...");
         this->mode_ = OpMode::CACHE_READ;
-        this->cache_reads_pending_ = 0;
 
         if (this->cached_handle_ != 0) {
-          this->cache_reads_pending_++;
           esp_ble_gattc_read_char(this->parent()->get_gattc_if(),
             this->parent()->get_conn_id(), this->cached_handle_, ESP_GATT_AUTH_REQ_NONE);
         } else {
-          ESP_LOGW(TAG, "Cached measurement characteristic (1962) not found");
-        }
-
-        if (this->timestamp_handle_ != 0) {
-          this->cache_reads_pending_++;
-          esp_ble_gattc_read_char(this->parent()->get_gattc_if(),
-            this->parent()->get_conn_id(), this->timestamp_handle_, ESP_GATT_AUTH_REQ_NONE);
-        }
-
-        if (this->cache_reads_pending_ == 0) {
-          ESP_LOGW(TAG, "No characteristics to read, disconnecting");
+          ESP_LOGW(TAG, "Cached measurement characteristic (1962) not found, disconnecting");
           this->schedule_disconnect_();
         }
       } else if (this->mode_ == OpMode::MEASURE_CONNECT) {
@@ -251,15 +247,8 @@ void MagnusHawki::gattc_event_handler(esp_gattc_cb_event_t event,
       } else if (param->notify.handle == this->result_handle_) {
         ESP_LOGI(TAG, "Distance result received");
         this->parse_distance_(param->notify.value, param->notify.value_len, false);
-        this->mode_ = OpMode::MEASURE_DONE;
-
-        // Read timestamp then disconnect
-        if (this->timestamp_handle_ != 0) {
-          esp_ble_gattc_read_char(this->parent()->get_gattc_if(),
-            this->parent()->get_conn_id(), this->timestamp_handle_, ESP_GATT_AUTH_REQ_NONE);
-        } else {
-          this->schedule_disconnect_();
-        }
+        this->publish_last_read_time_();
+        this->schedule_disconnect_();
       }
       break;
     }
@@ -271,18 +260,11 @@ void MagnusHawki::gattc_event_handler(esp_gattc_cb_event_t event,
       } else if (param->read.handle == this->cached_handle_) {
         // Parse cached measurement from 1962: "00095 001 304 0"
         this->parse_distance_(param->read.value, param->read.value_len, true);
-      } else if (param->read.handle == this->timestamp_handle_) {
-        this->parse_timestamp_(param->read.value, param->read.value_len);
+        this->publish_last_read_time_();
       }
 
-      // In cache read mode, disconnect after all reads complete
+      // In cache read mode, disconnect after read completes
       if (this->mode_ == OpMode::CACHE_READ) {
-        this->cache_reads_pending_--;
-        if (this->cache_reads_pending_ <= 0) {
-          this->schedule_disconnect_();
-        }
-      } else if (this->mode_ == OpMode::MEASURE_DONE) {
-        // Timestamp read after fresh measurement
         this->schedule_disconnect_();
       }
       break;
@@ -357,17 +339,27 @@ void MagnusHawki::parse_distance_(const uint8_t *data, uint16_t length, bool fro
   }
 }
 
-void MagnusHawki::parse_timestamp_(const uint8_t *data, uint16_t length) {
-  std::string timestamp(reinterpret_cast<const char *>(data), length);
-  ESP_LOGD(TAG, "Timestamp: %s", timestamp.c_str());
+void MagnusHawki::publish_last_read_time_() {
+  if (this->last_read_sensor_ == nullptr)
+    return;
 
-  if (this->timestamp_sensor_ != nullptr) {
-    this->timestamp_sensor_->publish_state(timestamp);
+  time_t now = ::time(nullptr);
+  if (now < 1600000000) {
+    // Time not synced yet
+    this->last_read_sensor_->publish_state("unknown");
+    return;
   }
+
+  auto esptime = ESPTime::from_epoch_local(now);
+  char buf[20];
+  esptime.strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S");
+  ESP_LOGD(TAG, "Last read time: %s", buf);
+  this->last_read_sensor_->publish_state(buf);
 }
 
 void MagnusHawki::schedule_disconnect_() {
   ESP_LOGI(TAG, "Operation complete, disconnecting...");
+  this->retry_count_ = 0;
   this->mode_ = OpMode::DISCONNECTING;
   this->do_disconnect_();
 }

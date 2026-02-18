@@ -24,6 +24,11 @@ wifi:
 
 captive_portal:
 
+# Time source - needed for "last read" timestamp
+time:
+  - platform: homeassistant
+    id: ha_time
+
 # Load the Magnus HAWKi component
 external_components:
   - source: github://denislooby/esphome-magnus-hawki
@@ -39,6 +44,7 @@ ble_client:
 # Magnus HAWKi hub
 # Connects every 4 hours to read cached data, then disconnects.
 # Use the "measure" button in HA to trigger a fresh radar measurement.
+# Use the "read cache" button to read cached data on demand.
 magnus_hawki:
   ble_client_id: hawki_ble
   tank_height: 1040      # mm - distance from sensor to outflow pipe (usable depth)
@@ -55,11 +61,13 @@ sensor:
 
 text_sensor:
   - platform: magnus_hawki
-    timestamp:
-      name: "Oil Tank Last Reading"
+    last_read:
+      name: "Oil Tank Last Read"
 
-# Button to trigger a fresh radar measurement on demand
+# Buttons
 button:
   - platform: magnus_hawki
     measure:
       name: "Oil Tank Measure Now"
+    read_cache:
+      name: "Oil Tank Read Cache"

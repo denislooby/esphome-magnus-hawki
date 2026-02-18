@@ -8,9 +8,16 @@ from . import magnus_hawki_ns, MagnusHawki, CONF_MAGNUS_HAWKI_ID
 DEPENDENCIES = ["magnus_hawki"]
 
 CONF_MEASURE = "measure"
+CONF_READ_CACHE = "read_cache"
 
 MagnusHawkiMeasureButton = magnus_hawki_ns.class_(
     "MagnusHawkiMeasureButton",
+    button.Button,
+    cg.Parented.template(MagnusHawki),
+)
+
+MagnusHawkiReadCacheButton = magnus_hawki_ns.class_(
+    "MagnusHawkiReadCacheButton",
     button.Button,
     cg.Parented.template(MagnusHawki),
 )
@@ -22,6 +29,10 @@ CONFIG_SCHEMA = cv.Schema(
             MagnusHawkiMeasureButton,
             icon="mdi:radar",
         ),
+        cv.Optional(CONF_READ_CACHE): button.button_schema(
+            MagnusHawkiReadCacheButton,
+            icon="mdi:cached",
+        ),
     }
 )
 
@@ -31,4 +42,8 @@ async def to_code(config):
 
     if measure_config := config.get(CONF_MEASURE):
         btn = await button.new_button(measure_config)
+        await cg.register_parented(btn, config[CONF_MAGNUS_HAWKI_ID])
+
+    if read_cache_config := config.get(CONF_READ_CACHE):
+        btn = await button.new_button(read_cache_config)
         await cg.register_parented(btn, config[CONF_MAGNUS_HAWKI_ID])
