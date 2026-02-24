@@ -61,6 +61,9 @@ class MagnusHawki : public PollingComponent, public ble_client::BLEClientNode {
   uint16_t result_handle_{0};    // 2014
   uint16_t cached_handle_{0};    // 1962
   uint16_t debug_handle_{0};     // 1969
+  uint16_t batt_a_handle_{0};    // 1930 (battery candidate)
+  uint16_t batt_b_handle_{0};    // 1967 (battery candidate)
+  uint8_t cache_reads_pending_{0};
 
   float tank_height_{0};
   float offset_{0};

@@ -28,6 +28,10 @@ static const esp32_ble_tracker::ESPBTUUID CHAR_CACHED =
     esp32_ble_tracker::ESPBTUUID::from_raw("00001962-1322-ffdd-3533-886fdadce133");
 static const esp32_ble_tracker::ESPBTUUID CHAR_DEBUG =
     esp32_ble_tracker::ESPBTUUID::from_raw("00001969-1322-ffdd-3533-886fdadce133");
+static const esp32_ble_tracker::ESPBTUUID CHAR_BATT_A =
+    esp32_ble_tracker::ESPBTUUID::from_raw("00001930-1322-ffdd-3533-886fdadce133");
+static const esp32_ble_tracker::ESPBTUUID CHAR_BATT_B =
+    esp32_ble_tracker::ESPBTUUID::from_raw("00001967-1322-ffdd-3533-886fdadce133");
 
 void MagnusHawki::setup() {
   ESP_LOGCONFIG(TAG, "Setting up Magnus HAWKi...");
@@ -123,6 +127,8 @@ void MagnusHawki::gattc_event_handler(esp_gattc_cb_event_t event,
       this->result_handle_ = 0;
       this->cached_handle_ = 0;
       this->debug_handle_ = 0;
+      this->batt_a_handle_ = 0;
+      this->batt_b_handle_ = 0;
       if (this->mode_ != OpMode::IDLE) {
         this->mode_ = OpMode::IDLE;
       }
@@ -147,16 +153,40 @@ void MagnusHawki::gattc_event_handler(esp_gattc_cb_event_t event,
       auto *debug_chr = this->parent()->get_characteristic(SERVICE_MAIN, CHAR_DEBUG);
       if (debug_chr != nullptr) this->debug_handle_ = debug_chr->handle;
 
+      auto *batt_a_chr = this->parent()->get_characteristic(SERVICE_MAIN, CHAR_BATT_A);
+      if (batt_a_chr != nullptr) this->batt_a_handle_ = batt_a_chr->handle;
+
+      auto *batt_b_chr = this->parent()->get_characteristic(SERVICE_MAIN, CHAR_BATT_B);
+      if (batt_b_chr != nullptr) this->batt_b_handle_ = batt_b_chr->handle;
+
       if (this->mode_ == OpMode::CACHE_CONNECT) {
         // === CACHE READ MODE ===
-        ESP_LOGI(TAG, "Reading cached measurement...");
+        ESP_LOGI(TAG, "Reading cached measurement + battery candidates...");
         this->mode_ = OpMode::CACHE_READ;
+        this->cache_reads_pending_ = 0;
 
         if (this->cached_handle_ != 0) {
+          this->cache_reads_pending_++;
           esp_ble_gattc_read_char(this->parent()->get_gattc_if(),
             this->parent()->get_conn_id(), this->cached_handle_, ESP_GATT_AUTH_REQ_NONE);
         } else {
-          ESP_LOGW(TAG, "Cached measurement characteristic (1962) not found, disconnecting");
+          ESP_LOGW(TAG, "Cached measurement characteristic (1962) not found");
+        }
+
+        if (this->batt_a_handle_ != 0) {
+          this->cache_reads_pending_++;
+          esp_ble_gattc_read_char(this->parent()->get_gattc_if(),
+            this->parent()->get_conn_id(), this->batt_a_handle_, ESP_GATT_AUTH_REQ_NONE);
+        }
+
+        if (this->batt_b_handle_ != 0) {
+          this->cache_reads_pending_++;
+          esp_ble_gattc_read_char(this->parent()->get_gattc_if(),
+            this->parent()->get_conn_id(), this->batt_b_handle_, ESP_GATT_AUTH_REQ_NONE);
+        }
+
+        if (this->cache_reads_pending_ == 0) {
+          ESP_LOGW(TAG, "No characteristics to read, disconnecting");
           this->schedule_disconnect_();
         }
       } else if (this->mode_ == OpMode::MEASURE_CONNECT) {
@@ -250,14 +280,22 @@ void MagnusHawki::gattc_event_handler(esp_gattc_cb_event_t event,
         ESP_LOGW(TAG, "Read failed for handle 0x%x, status=%d",
                  param->read.handle, param->read.status);
       } else if (param->read.handle == this->cached_handle_) {
-        // Parse cached measurement from 1962: "00095 001 304 0"
         this->parse_distance_(param->read.value, param->read.value_len, true);
         this->publish_last_read_time_();
+      } else if (param->read.handle == this->batt_a_handle_) {
+        uint8_t val = param->read.value[0];
+        ESP_LOGI(TAG, "Battery candidate 1930: raw=%u (0x%02X) — check Magnus app %%", val, val);
+      } else if (param->read.handle == this->batt_b_handle_) {
+        uint8_t val = param->read.value[0];
+        ESP_LOGI(TAG, "Battery candidate 1967: raw=%u (0x%02X) — check Magnus app %%", val, val);
       }
 
-      // In cache read mode, disconnect after read completes
+      // In cache read mode, disconnect after all reads complete
       if (this->mode_ == OpMode::CACHE_READ) {
-        this->schedule_disconnect_();
+        this->cache_reads_pending_--;
+        if (this->cache_reads_pending_ <= 0) {
+          this->schedule_disconnect_();
+        }
       }
       break;
     }
