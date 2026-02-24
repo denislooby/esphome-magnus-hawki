@@ -47,16 +47,8 @@ void MagnusHawki::dump_config() {
 }
 
 void MagnusHawki::update() {
-  // Check for operation timeout
   if (this->mode_ != OpMode::IDLE) {
-    uint32_t elapsed = millis() - this->operation_start_time_;
-    if (elapsed > OPERATION_TIMEOUT_MS) {
-      ESP_LOGW(TAG, "Operation timed out after %u ms, disconnecting", elapsed);
-      this->mode_ = OpMode::IDLE;
-      this->do_disconnect_();
-      return;
-    }
-    ESP_LOGD(TAG, "Operation in progress (%u ms), skipping update", elapsed);
+    ESP_LOGD(TAG, "Operation in progress, skipping update");
     return;
   }
 
@@ -65,7 +57,7 @@ void MagnusHawki::update() {
     ESP_LOGI(TAG, "Fresh measurement requested, connecting...");
     this->fresh_measure_requested_ = false;
     this->mode_ = OpMode::MEASURE_CONNECT;
-    this->operation_start_time_ = millis();
+    this->arm_watchdog_();
     this->parent()->set_enabled(true);
     return;
   }
@@ -73,7 +65,7 @@ void MagnusHawki::update() {
   // Normal periodic update: connect and read cached values
   ESP_LOGI(TAG, "Periodic update: connecting to read cached values...");
   this->mode_ = OpMode::CACHE_CONNECT;
-  this->operation_start_time_ = millis();
+  this->arm_watchdog_();
   this->parent()->set_enabled(true);
 }
 
@@ -95,7 +87,7 @@ void MagnusHawki::trigger_cache_read() {
   }
   ESP_LOGI(TAG, "Cache read requested via button");
   this->mode_ = OpMode::CACHE_CONNECT;
-  this->operation_start_time_ = millis();
+  this->arm_watchdog_();
   this->parent()->set_enabled(true);
 }
 
@@ -357,7 +349,20 @@ void MagnusHawki::publish_last_read_time_() {
   this->last_read_sensor_->publish_state(buf);
 }
 
+void MagnusHawki::arm_watchdog_() {
+  this->cancel_timeout("watchdog");
+  this->set_timeout("watchdog", OPERATION_TIMEOUT_MS, [this]() {
+    if (this->mode_ != OpMode::IDLE) {
+      ESP_LOGW(TAG, "Operation timed out after %u ms, forcing disconnect", OPERATION_TIMEOUT_MS);
+      this->retry_count_ = 0;
+      this->mode_ = OpMode::IDLE;
+      this->do_disconnect_();
+    }
+  });
+}
+
 void MagnusHawki::schedule_disconnect_() {
+  this->cancel_timeout("watchdog");
   ESP_LOGI(TAG, "Operation complete, disconnecting...");
   this->retry_count_ = 0;
   this->mode_ = OpMode::DISCONNECTING;

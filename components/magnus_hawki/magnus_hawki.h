@@ -49,6 +49,7 @@ class MagnusHawki : public PollingComponent, public ble_client::BLEClientNode {
  protected:
   void parse_distance_(const uint8_t *data, uint16_t length, bool from_cache);
   void publish_last_read_time_();
+  void arm_watchdog_();
   void schedule_disconnect_();
   void do_disconnect_();
 
@@ -65,7 +66,6 @@ class MagnusHawki : public PollingComponent, public ble_client::BLEClientNode {
   float offset_{0};
   OpMode mode_{OpMode::IDLE};
   bool fresh_measure_requested_{false};
-  uint32_t operation_start_time_{0};
   static const uint32_t OPERATION_TIMEOUT_MS = 30000;
 
   bool has_value_{false};       // True after first successful read
