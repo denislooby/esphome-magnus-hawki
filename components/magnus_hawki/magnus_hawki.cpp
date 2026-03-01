@@ -392,17 +392,9 @@ void MagnusHawki::arm_watchdog_() {
   this->set_timeout("watchdog", OPERATION_TIMEOUT_MS, [this]() {
     if (this->mode_ != OpMode::IDLE) {
       ESP_LOGW(TAG, "Operation timed out after %u ms, forcing disconnect", OPERATION_TIMEOUT_MS);
+      this->retry_count_ = 0;
       this->mode_ = OpMode::IDLE;
       this->do_disconnect_();
-
-      if (this->retry_count_ < MAX_RETRIES) {
-        this->retry_count_++;
-        ESP_LOGI(TAG, "Scheduling retry %d/%d in 30s", this->retry_count_, MAX_RETRIES);
-        this->set_timeout("retry", RETRY_DELAY_MS, [this]() { this->update(); });
-      } else {
-        ESP_LOGW(TAG, "Max retries reached, waiting for next update cycle");
-        this->retry_count_ = 0;
-      }
     }
   });
 }
