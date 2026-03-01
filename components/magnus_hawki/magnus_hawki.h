@@ -69,7 +69,7 @@ class MagnusHawki : public PollingComponent, public ble_client::BLEClientNode {
   float offset_{0};
   OpMode mode_{OpMode::IDLE};
   bool fresh_measure_requested_{false};
-  static const uint32_t OPERATION_TIMEOUT_MS = 30000;
+  static const uint32_t OPERATION_TIMEOUT_MS = 60000;
 
   bool has_value_{false};       // True after first successful read
   uint8_t retry_count_{0};     // Retries on connection failure
