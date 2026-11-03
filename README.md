@@ -48,13 +48,15 @@ sensor:
 
 text_sensor:
   - platform: magnus_hawki
-    timestamp:
-      name: "Oil Tank Last Reading"
+    last_read:
+      name: "Oil Tank Last Read"
 
 button:
   - platform: magnus_hawki
     measure:
       name: "Oil Tank Measure Now"
+    read_cache:
+      name: "Oil Tank Read Cache"
 ```
 
 ### Configuration Variables
@@ -79,7 +81,14 @@ button:
 
 | Sensor | Description |
 |---|---|
-| `timestamp` | Last measurement time from the device |
+| `last_read` | Time the ESP32 last got a reading (`YYYY-MM-DD HH:MM:SS`, ESP32 local time). Needs a `time:` source, shows `unknown` until time is synced |
+
+**Button Platform**
+
+| Button | Description |
+|---|---|
+| `measure` | Trigger a fresh radar measurement (uses more battery) |
+| `read_cache` | Read the cached measurement now, without waiting for `update_interval` |
 
 ## Finding Your Device MAC Address
 
@@ -109,20 +118,29 @@ For example, with `offset: 0` and `tank_height: 1040`, a distance reading of 95m
 
 The component operates in two modes to preserve the HAWKi's CR123A battery:
 
-**Normal mode (periodic cache read):**
-1. **Connect** to the HAWKi via `ble_client`
-2. **Read** characteristic `1962` for the cached measurement
-3. **Read** characteristic `1993` for the timestamp
-4. **Disconnect** immediately (~3 seconds total)
+The BLE client stays disabled between operations. The component only connects when it needs a reading.
 
-**Fresh measurement (via button press in HA):**
-1. **Connect** and subscribe to `1969` (debug log — required for radar to power on)
-2. **Subscribe** to `2014` (result) then `1960` (trigger)
+**Cached read (every `update_interval`, or the `read_cache` button):**
+1. **Connect** to the HAWKi via `ble_client`
+2. **Read** characteristic `1962` for the cached measurement, e.g. `00095 001 304 0` (first field = distance in mm)
+3. **Disconnect** immediately (~3 seconds total). The radar is not powered on.
+
+**Fresh measurement (the `measure` button):**
+1. **Connect** and subscribe to `1969` (debug log, required for the radar to power on)
+2. **Subscribe** to `2014` (result), then `1960` (subscribing to `1960` starts the measurement)
 3. The device runs through states `01` -> `02` -> `05` (~6 seconds)
-4. **Receive** the result on `2014` as ASCII: `distance_mid  135/0`
-5. **Read** timestamp from `1993`, then **disconnect**
+4. **Receive** the result on `2014` as ASCII, e.g. `distance_mid  95/0`
+5. **Disconnect**
+
+After either path, the component publishes the distance and level, and sets `last_read` to the ESP32's current time.
+
+**Reliability:**
+- If the connection fails, the component retries up to 3 times, 30 seconds apart
+- A 5-minute watchdog forces a disconnect if an operation hangs
 
 The component disconnects after each operation so the Magnus app can connect normally. No authentication or bonding is required.
+
+**Battery investigation (temporary):** cached reads also read `1930` and `1967` and log their raw values. These are candidates for the battery level. Compare them with the percentage shown in the Magnus app.
 
 ## Troubleshooting
 
@@ -156,12 +174,12 @@ The component disconnects after each operation so the Magnus app can connect nor
 |---|---|---|---|
 | `1960` | `00001923-...` | Notify | Measurement trigger (01->02->05) |
 | `2014` | `00002010-...` | Notify | Result: `distance_mid  {mm}/{status}` |
-| `1993` | `00001923-...` | Read | Timestamp: `DD.MM.YYYY HH:MM:SS` |
+| `1993` | `00001923-...` | Read | Device timestamp: `DD.MM.YYYY HH:MM:SS` (not used by the component) |
 | `1962` | `00001923-...` | Read | Cached measurement: `{dist} {n} {ref} {status}` |
 | `1969` | `00001923-...` | Notify | Debug log stream (must subscribe for radar to run) |
 | `1991` | `00001923-...` | Read | Tank dimensions (height in mm) |
 
-For the complete BLE characteristic map, see [magnus-hawki-ble.md](https://github.com/denislooby/esphome-magnus-hawki/blob/main/docs/ble-protocol.md).
+For the complete BLE characteristic map, see [docs/ble-protocol.md](docs/ble-protocol.md).
 
 ## License
 
