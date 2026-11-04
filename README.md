@@ -177,7 +177,7 @@ The component disconnects after each operation so the Magnus app can connect nor
 | `1993` | `00001923-...` | Read | Device timestamp: `DD.MM.YYYY HH:MM:SS` (not used by the component) |
 | `1962` | `00001923-...` | Read | Cached measurement: `{dist} {n} {ref} {status}` |
 | `1969` | `00001923-...` | Notify | Debug log stream (must subscribe for radar to run) |
-| `1991` | `00001923-...` | Read | Tank dimensions (height in mm) |
+| `1991` | `00001923-...` | Read | Probably tank dimensions in mm (unconfirmed) |
 
 For the complete BLE characteristic map, see [docs/ble-protocol.md](docs/ble-protocol.md).
 
