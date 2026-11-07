@@ -1,9 +1,9 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
-from esphome.components import ble_client
+from esphome.components import ble_client, esp32_ble_tracker
 from esphome.const import CONF_ID
 
-DEPENDENCIES = ["ble_client"]
+DEPENDENCIES = ["ble_client", "esp32_ble_tracker"]
 CODEOWNERS = ["@denislooby"]
 AUTO_LOAD = ["sensor", "text_sensor", "button"]
 
@@ -16,6 +16,7 @@ MagnusHawki = magnus_hawki_ns.class_(
     "MagnusHawki",
     cg.PollingComponent,
     ble_client.BLEClientNode,
+    esp32_ble_tracker.ESPBTDeviceListener,
 )
 
 CONFIG_SCHEMA = (
@@ -28,6 +29,7 @@ CONFIG_SCHEMA = (
     )
     .extend(cv.polling_component_schema("14400s"))
     .extend(ble_client.BLE_CLIENT_SCHEMA)
+    .extend(esp32_ble_tracker.ESP_BLE_DEVICE_SCHEMA)
 )
 
 
@@ -35,6 +37,7 @@ async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
     await ble_client.register_ble_node(var, config)
+    await esp32_ble_tracker.register_ble_device(var, config)
 
     if CONF_TANK_HEIGHT in config:
         cg.add(var.set_tank_height(config[CONF_TANK_HEIGHT]))

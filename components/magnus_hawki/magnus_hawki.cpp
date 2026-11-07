@@ -28,10 +28,10 @@ static const esp32_ble_tracker::ESPBTUUID CHAR_CACHED =
     esp32_ble_tracker::ESPBTUUID::from_raw("00001962-1322-ffdd-3533-886fdadce133");
 static const esp32_ble_tracker::ESPBTUUID CHAR_DEBUG =
     esp32_ble_tracker::ESPBTUUID::from_raw("00001969-1322-ffdd-3533-886fdadce133");
-static const esp32_ble_tracker::ESPBTUUID CHAR_BATT_A =
-    esp32_ble_tracker::ESPBTUUID::from_raw("00001930-1322-ffdd-3533-886fdadce133");
-static const esp32_ble_tracker::ESPBTUUID CHAR_BATT_B =
-    esp32_ble_tracker::ESPBTUUID::from_raw("00001967-1322-ffdd-3533-886fdadce133");
+
+// Advertisement manufacturer data (see docs/ble-protocol.md#advertisement-data)
+static const uint8_t ADV_FORMAT = 3;                  // low nibble of the first byte
+static const uint16_t ADV_DISTANCE_NO_TARGET = 16382;  // 16382/16383: no radar target
 
 void MagnusHawki::setup() {
   ESP_LOGCONFIG(TAG, "Setting up Magnus HAWKi...");
@@ -43,9 +43,10 @@ void MagnusHawki::dump_config() {
   ESP_LOGCONFIG(TAG, "Magnus HAWKi:");
   ESP_LOGCONFIG(TAG, "  Tank Height: %.0f mm", this->tank_height_);
   ESP_LOGCONFIG(TAG, "  Sensor Offset: %.0f mm", this->offset_);
-  ESP_LOGCONFIG(TAG, "  Mode: cache read (button for fresh measurement)");
+  ESP_LOGCONFIG(TAG, "  Mode: advertisement decoding + cache read (button for fresh measurement)");
   LOG_SENSOR("  ", "Distance", this->distance_sensor_);
   LOG_SENSOR("  ", "Level", this->level_sensor_);
+  LOG_SENSOR("  ", "Battery", this->battery_sensor_);
   LOG_TEXT_SENSOR("  ", "Last Read", this->last_read_sensor_);
   LOG_UPDATE_INTERVAL(this);
 }
@@ -62,7 +63,7 @@ void MagnusHawki::update() {
     this->fresh_measure_requested_ = false;
     this->mode_ = OpMode::MEASURE_CONNECT;
     this->arm_watchdog_();
-    this->parent()->set_enabled(true);
+    this->request_connection_();
     return;
   }
 
@@ -70,7 +71,7 @@ void MagnusHawki::update() {
   ESP_LOGI(TAG, "Periodic update: connecting to read cached values...");
   this->mode_ = OpMode::CACHE_CONNECT;
   this->arm_watchdog_();
-  this->parent()->set_enabled(true);
+  this->request_connection_();
 }
 
 void MagnusHawki::trigger_fresh_measurement() {
@@ -92,7 +93,7 @@ void MagnusHawki::trigger_cache_read() {
   ESP_LOGI(TAG, "Cache read requested via button");
   this->mode_ = OpMode::CACHE_CONNECT;
   this->arm_watchdog_();
-  this->parent()->set_enabled(true);
+  this->request_connection_();
 }
 
 void MagnusHawki::gattc_event_handler(esp_gattc_cb_event_t event,
@@ -100,8 +101,19 @@ void MagnusHawki::gattc_event_handler(esp_gattc_cb_event_t event,
                                        esp_ble_gattc_cb_param_t *param) {
   switch (event) {
     case ESP_GATTC_OPEN_EVT: {
-      if (param->open.status == ESP_GATT_OK) {
+      bool requested = this->connect_requested_;
+      this->connect_requested_ = false;
+      if (param->open.status == ESP_GATT_OK && !requested) {
+        // BLEClient::setup() re-enables the client after our setup(), so with auto_connect it
+        // connects at boot on its own. Nothing would ever disconnect it, blocking the Magnus app.
+        ESP_LOGD(TAG, "Connected without a pending operation, disconnecting");
+        this->parent()->set_enabled(false);
+      } else if (param->open.status == ESP_GATT_OK) {
         ESP_LOGI(TAG, "Connected to Magnus HAWKi");
+      } else if (!requested) {
+        // An unrequested auto-connect failed: nothing to retry
+        ESP_LOGD(TAG, "Unrequested connection failed, status=%d", param->open.status);
+        this->parent()->set_enabled(false);
       } else {
         ESP_LOGW(TAG, "Connection failed, status=%d", param->open.status);
         this->mode_ = OpMode::IDLE;
@@ -127,8 +139,6 @@ void MagnusHawki::gattc_event_handler(esp_gattc_cb_event_t event,
       this->result_handle_ = 0;
       this->cached_handle_ = 0;
       this->debug_handle_ = 0;
-      this->batt_a_handle_ = 0;
-      this->batt_b_handle_ = 0;
       if (this->mode_ != OpMode::IDLE) {
         this->mode_ = OpMode::IDLE;
       }
@@ -153,15 +163,9 @@ void MagnusHawki::gattc_event_handler(esp_gattc_cb_event_t event,
       auto *debug_chr = this->parent()->get_characteristic(SERVICE_MAIN, CHAR_DEBUG);
       if (debug_chr != nullptr) this->debug_handle_ = debug_chr->handle;
 
-      auto *batt_a_chr = this->parent()->get_characteristic(SERVICE_MAIN, CHAR_BATT_A);
-      if (batt_a_chr != nullptr) this->batt_a_handle_ = batt_a_chr->handle;
-
-      auto *batt_b_chr = this->parent()->get_characteristic(SERVICE_MAIN, CHAR_BATT_B);
-      if (batt_b_chr != nullptr) this->batt_b_handle_ = batt_b_chr->handle;
-
       if (this->mode_ == OpMode::CACHE_CONNECT) {
         // === CACHE READ MODE ===
-        ESP_LOGI(TAG, "Reading cached measurement + battery candidates...");
+        ESP_LOGI(TAG, "Reading cached measurement...");
         this->mode_ = OpMode::CACHE_READ;
         this->cache_reads_pending_ = 0;
 
@@ -171,18 +175,6 @@ void MagnusHawki::gattc_event_handler(esp_gattc_cb_event_t event,
             this->parent()->get_conn_id(), this->cached_handle_, ESP_GATT_AUTH_REQ_NONE);
         } else {
           ESP_LOGW(TAG, "Cached measurement characteristic (1962) not found");
-        }
-
-        if (this->batt_a_handle_ != 0) {
-          this->cache_reads_pending_++;
-          esp_ble_gattc_read_char(this->parent()->get_gattc_if(),
-            this->parent()->get_conn_id(), this->batt_a_handle_, ESP_GATT_AUTH_REQ_NONE);
-        }
-
-        if (this->batt_b_handle_ != 0) {
-          this->cache_reads_pending_++;
-          esp_ble_gattc_read_char(this->parent()->get_gattc_if(),
-            this->parent()->get_conn_id(), this->batt_b_handle_, ESP_GATT_AUTH_REQ_NONE);
         }
 
         if (this->cache_reads_pending_ == 0) {
@@ -282,12 +274,6 @@ void MagnusHawki::gattc_event_handler(esp_gattc_cb_event_t event,
       } else if (param->read.handle == this->cached_handle_) {
         this->parse_distance_(param->read.value, param->read.value_len, true);
         this->publish_last_read_time_();
-      } else if (param->read.handle == this->batt_a_handle_) {
-        uint8_t val = param->read.value[0];
-        ESP_LOGI(TAG, "Battery candidate 1930: raw=%u (0x%02X) — check Magnus app %%", val, val);
-      } else if (param->read.handle == this->batt_b_handle_) {
-        uint8_t val = param->read.value[0];
-        ESP_LOGI(TAG, "Battery candidate 1967: raw=%u (0x%02X) — check Magnus app %%", val, val);
       }
 
       // In cache read mode, disconnect after all reads complete
@@ -351,7 +337,11 @@ void MagnusHawki::parse_distance_(const uint8_t *data, uint16_t length, bool fro
     return;
   }
 
-  ESP_LOGI(TAG, "Oil distance: %.0f mm (%s)", distance, from_cache ? "cached" : "fresh");
+  this->publish_distance_(distance, from_cache ? "cached" : "fresh");
+}
+
+void MagnusHawki::publish_distance_(float distance, const char *source) {
+  ESP_LOGI(TAG, "Oil distance: %.0f mm (%s)", distance, source);
   this->has_value_ = true;
 
   if (this->distance_sensor_ != nullptr) {
@@ -367,6 +357,51 @@ void MagnusHawki::parse_distance_(const uint8_t *data, uint16_t length, bool fro
              level, oil_depth, this->tank_height_, this->offset_);
     this->level_sensor_->publish_state(level);
   }
+}
+
+bool MagnusHawki::parse_device(const esp32_ble_tracker::ESPBTDevice &device) {
+  if (device.address_uint64() != this->parent()->get_address())
+    return false;
+
+  for (const auto &md : device.get_manufacturer_datas()) {
+    // The BLE stack splits the 10-byte payload into a 16-bit "company id" and 8 data bytes.
+    const esp_bt_uuid_t uuid = md.uuid.get_uuid();
+    if (uuid.len != ESP_UUID_LEN_16 || md.data.size() != 8)
+      continue;
+    uint8_t b[10];
+    b[0] = uuid.uuid.uuid16 & 0xFF;
+    b[1] = uuid.uuid.uuid16 >> 8;
+    std::memcpy(b + 2, md.data.data(), 8);
+    if ((b[0] & 0x0F) != ADV_FORMAT)
+      continue;
+
+    // One little-endian 80-bit value: bits 0-3 format, 4-35 reading time (unix s),
+    // 36-49 distance (mm), 50-58 unknown, 59-65 battery (%), 72-79 firmware version
+    uint32_t timestamp = (b[0] >> 4) | (uint32_t(b[1]) << 4) | (uint32_t(b[2]) << 12) |
+                         (uint32_t(b[3]) << 20) | (uint32_t(b[4] & 0x0F) << 28);
+    uint16_t distance = (b[4] >> 4) | (uint16_t(b[5]) << 4) | (uint16_t(b[6] & 0x03) << 12);
+    uint8_t battery = (b[7] >> 3) | ((b[8] & 0x03) << 5);
+
+    if (this->battery_sensor_ != nullptr &&
+        (!this->battery_sensor_->has_state() || this->battery_sensor_->state != battery)) {
+      this->battery_sensor_->publish_state(battery);
+    }
+
+    if (timestamp != this->last_adv_timestamp_) {
+      this->last_adv_timestamp_ = timestamp;
+      ESP_LOGD(TAG, "Advertised reading: time=%u distance=%u battery=%u%% firmware=%u",
+               (unsigned) timestamp, (unsigned) distance, (unsigned) battery, (unsigned) b[9]);
+      if (distance >= ADV_DISTANCE_NO_TARGET) {
+        ESP_LOGW(TAG, "No radar target in advertised reading (distance=%u), skipping publish",
+                 (unsigned) distance);
+      } else {
+        this->publish_distance_(distance, "advertised");
+        this->publish_last_read_time_();
+      }
+    }
+    break;
+  }
+  return true;
 }
 
 void MagnusHawki::publish_last_read_time_() {
@@ -385,6 +420,11 @@ void MagnusHawki::publish_last_read_time_() {
   esptime.strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S");
   ESP_LOGD(TAG, "Last read time: %s", buf);
   this->last_read_sensor_->publish_state(buf);
+}
+
+void MagnusHawki::request_connection_() {
+  this->connect_requested_ = true;
+  this->parent()->set_enabled(true);
 }
 
 void MagnusHawki::arm_watchdog_() {
@@ -409,6 +449,7 @@ void MagnusHawki::schedule_disconnect_() {
 
 void MagnusHawki::do_disconnect_() {
   this->mode_ = OpMode::IDLE;
+  this->connect_requested_ = false;
   this->parent()->set_enabled(false);
 }
 

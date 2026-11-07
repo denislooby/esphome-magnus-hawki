@@ -45,6 +45,8 @@ sensor:
       name: "Oil Tank Distance"
     level:
       name: "Oil Tank Level"
+    battery_level:
+      name: "Oil Tank Battery"
 
 text_sensor:
   - platform: magnus_hawki
@@ -68,7 +70,7 @@ button:
 | `ble_client_id` | Yes | - | ID of the `ble_client` connected to your HAWKi |
 | `tank_height` | No | - | Distance from sensor to outflow pipe in mm (usable oil depth) |
 | `offset` | No | `0` | Distance from sensor to tank top in mm (0 if flush-mounted) |
-| `update_interval` | No | `14400s` | How often to read cached data (4 hours) |
+| `update_interval` | No | `14400s` | How often to connect and read cached data (4 hours). Advertisements already deliver each hourly reading, so this can be long or `never` |
 
 **Sensor Platform**
 
@@ -76,6 +78,7 @@ button:
 |---|---|---|
 | `distance` | mm | Raw distance from radar sensor to oil surface |
 | `level` | % | Oil level percentage (requires `tank_height`) |
+| `battery_level` | % | HAWKi battery, decoded from advertisements (the value the Magnus app shows) |
 
 **Text Sensor Platform**
 
@@ -116,9 +119,12 @@ For example, with `offset: 0` and `tank_height: 1040`, a distance reading of 95m
 
 ## How It Works
 
-The component operates in two modes to preserve the HAWKi's CR123A battery:
+The component gets readings in three ways, all designed to preserve the HAWKi's CR123A battery.
 
-The BLE client stays disabled between operations. The component only connects when it needs a reading.
+**Advertisements (passive, no connection):**
+The HAWKi measures hourly and broadcasts the latest reading in its BLE advertisements, along with its battery level. The component decodes every advertisement it hears: battery is published when it changes, and distance/level/`last_read` are published whenever the advertised reading time changes. This costs the HAWKi nothing extra and never blocks the Magnus app. Format: [Advertisement data](docs/ble-protocol.md#advertisement-data).
+
+For the two connection modes below, the BLE client stays disabled between operations and only connects when it needs a reading.
 
 **Cached read (every `update_interval`, or the `read_cache` button):**
 1. **Connect** to the HAWKi via `ble_client`
@@ -132,15 +138,13 @@ The BLE client stays disabled between operations. The component only connects wh
 4. **Receive** the result on `2014` as ASCII, e.g. `distance_mid  95/0`
 5. **Disconnect**
 
-After either path, the component publishes the distance and level, and sets `last_read` to the ESP32's current time.
+After any of these paths, the component publishes the distance and level, and sets `last_read` to the ESP32's current time.
 
 **Reliability:**
 - If the connection fails, the component retries up to 3 times, 30 seconds apart
 - A 5-minute watchdog forces a disconnect if an operation hangs
 
 The component disconnects after each operation so the Magnus app can connect normally. No authentication or bonding is required.
-
-**Battery investigation (temporary):** cached reads also read `1930` and `1967` and log their raw values. These are candidates for the battery level. Compare them with the percentage shown in the Magnus app.
 
 ## Troubleshooting
 
@@ -159,9 +163,8 @@ The component disconnects after each operation so the Magnus app can connect nor
 - Distance increases as oil level drops (sensor is at the top)
 
 **Stale readings:**
-- The default `update_interval` is 4 hours to preserve battery life (CR123A)
-- Reduce it for more frequent readings, but this will drain the battery faster
-- Each measurement cycle takes ~5-6 seconds of BLE activity
+- Advertisements bring a new reading about once an hour, which is how often the HAWKi measures
+- The default `update_interval` of 4 hours also connects to read the cache. Each connection makes the HAWKi measure repeatedly for a few minutes, so shorter intervals cost battery. With advertisements working, `update_interval: never` avoids connections entirely
 
 **Distance shows 99999:**
 - This means the radar detected no target (empty tank or sensor not aimed correctly)
@@ -178,6 +181,7 @@ The component disconnects after each operation so the Magnus app can connect nor
 | `1962` | `00001923-...` | Read | Cached measurement: `{dist} {n} {ref} {status}` |
 | `1969` | `00001923-...` | Notify | Debug log stream (must subscribe for radar to run) |
 | `1991` | `00001923-...` | Read | Probably tank dimensions in mm (unconfirmed) |
+| Advertisement | manufacturer data | Broadcast | Latest reading time, distance, battery % and firmware ([format](docs/ble-protocol.md#advertisement-data)) |
 
 For the complete BLE characteristic map, see [docs/ble-protocol.md](docs/ble-protocol.md).
 

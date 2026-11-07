@@ -50,7 +50,7 @@ Values are as read from one device in February 2026. Multi-byte values are shown
 | Char | Type | Status | Example value | Description |
 |---|---|---|---|---|
 | `1924` | Read | Known | ASCII 12-char hex string | Device ID (matches the ID in the advertised name) |
-| `1930` | Read | Unknown | `0F` (15) | Battery candidate. Logged during cache reads |
+| `1930` | Read | Unknown | `0F` (15) | Not battery (battery is in the [advertisement](#advertisement-data)). Read `0F` on two devices |
 | `1934` | Write | Unknown | | Write-only. Probably a command/config input |
 | `1960` | Notify | Used | `01` → `02` → `05` | Measurement trigger. Subscribing starts a radar measurement. States: `01` starting, `02` measuring, `05` complete |
 | `1961` | Indicate | Unknown | | Subscribing delivered no data |
@@ -58,7 +58,7 @@ Values are as read from one device in February 2026. Multi-byte values are shown
 | `1963` | Write | Unknown | | Write-only |
 | `1964` | Read | Unknown | `02` | |
 | `1965` | Read | Known | ASCII `0106` | Firmware version |
-| `1967` | Read | Unknown | `0B` (11) | Battery candidate. Logged during cache reads |
+| `1967` | Read | Unknown | `0B` (11) | Not battery. Read `0B`/`0C` on two devices; possibly a temperature |
 | `1968` | Read | Unknown | `00000000` | Possibly a counter |
 | `1969` | Notify | Used | ASCII | Radar debug log. **Must be subscribed before triggering or the radar does not run.** See [Debug log](#1969-debug-log) |
 | `1978` | Read | Unknown | `02` | |
@@ -135,13 +135,39 @@ Final: Measured Radar Depth = 135
 
 (Condensed from a real trace.)
 
+### Advertisement data
+
+The HAWKi broadcasts its latest reading in the manufacturer-specific data of its advertisements, so it can be read without connecting. The Magnus app reads these values from the advertisement too: its log prints `Adv data: 3306F2AEF62F70900213` → `Level: 767; Timestamp (UTC): Sat, 07 Nov 2026 12:58:11 GMT; FW ver: 19; Battery: 82`.
+
+The payload is 10 bytes. BLE stacks report the first two bytes as the "company ID", but they are part of the payload and change with every reading. Read the 10 bytes as a single little-endian 80-bit integer:
+
+| Bits | Width | Field | Example (`3306F2AEF62F70900213`) |
+|---|---|---|---|
+| 0–3 | 4 | Format, always `3` so far | 3 |
+| 4–35 | 32 | Reading time, Unix seconds, device clock | 1794056291 (2026-11-07 12:58:11 UTC) |
+| 36–49 | 14 | Distance in mm. `16382`/`16383` = no target (the 14-bit counterparts of `99998`/`99999`) | 767 |
+| 50–58 | 9 | Unknown. Seen 0, 24, 28, 36 | 28 |
+| 59–65 | 7 | Battery %, the value the Magnus app shows | 82 |
+| 66–71 | 6 | Unused, always 0 so far | 0 |
+| 72–79 | 8 | Firmware version | 19 |
+
+Behaviour seen on one device in November 2026:
+
+- The advertisement normally carries the hourly reading. The Magnus app shows "Measurements are taken hourly".
+- After any connection attempt (Magnus app or ESP32, even a failed one), the reading time advances every 5–35 seconds for about 3–4 minutes, then returns to hourly. The distance varied during a burst (767 → 772 → 767 mm), so these are real radar measurements.
+- The device clock ran about 7 min 20 s fast, so reading times can be slightly in the future.
+- Battery can flip by 1% between consecutive readings (81/82).
+
+The two samples quoted in earlier versions of this document (`23a9da98e6ff63e00213`, `53a7ee98e6ff03d00213`) decode to 2026-02-12 and 2026-02-13, distance `16382` (no target), battery 92% and 90%, firmware 19.
+
 ### Special values
 
 - **Distance `99999` / `99998`**: no radar target detected (empty tank, misaligned sensor, or low battery). Treat it as "no reading", not as a real distance.
+- **Advertised distance `16383` / `16382`**: the same "no target" condition in the 14-bit advertisement field.
 
 ## Reading the Last Measurement
 
-The device measures on its own schedule and stores the result in `1962`. Reading it does not power the radar, so it is cheap on the battery.
+The device measures on its own schedule and stores the result in `1962`. Reading it does not explicitly start the radar, but any connection triggers a few minutes of repeated measurements (see [Advertisement data](#advertisement-data)). Connecting therefore costs battery; the advertisement carries the same reading for free.
 
 1. Connect and run service discovery
 2. Read `1962`
@@ -174,8 +200,9 @@ level_%   = oil_depth / tank_height * 100     (clamped to 0–100)
 
 ## Open Questions
 
-- **Battery level:** `1930` or `1967` are the main candidates. Compare their values with the Magnus app over time.
-- **Advertisement data:** the manufacturer data in advertisements changes between readings (e.g. `23a9da98 e6ff63e0 0213` → `53a7ee98 e6ff03d0 0213`). It may encode the latest reading, which would allow passive monitoring without connecting.
+- **Unknown advertisement field** (bits 50–58): seen 0, 24, 28 and 36. Possibly temperature or a counter.
+- **Measurement bursts after connecting:** how much battery does a burst cost, and can it be avoided while still reading `1962`?
+- **`1930` and `1967`:** not battery. Meaning unknown.
 - **Write-only characteristics** (`1934`, `1963`, `1999`): not explored.
 - **Tank configuration** (`1990`, `1991`, `1992`, `1996`): the exact mapping to the app's settings is unconfirmed.
 
@@ -184,5 +211,6 @@ level_%   = oil_depth / tank_height * 100     (clamped to 0–100)
 1. **nRF Connect (iOS):** connected to the device, listed all services and characteristics, read every readable value, and subscribed to the notify characteristics. This showed that `1960` triggers a measurement and that `2014` delivers the result.
 2. **ESP32 probe component:** a throwaway ESPHome component that resolves every known characteristic, reads them all, subscribes to the notify characteristics, triggers a measurement, then re-reads `1962` and `1993`. This confirmed that `1962` holds the last distance.
 3. **Component development:** building the `magnus_hawki` component showed that the radar does not run unless `1969` is subscribed first.
+4. **Advertisement decoding:** the Magnus app's log screen prints each advertisement's raw payload next to its decoded level, timestamp, firmware and battery. Matching those values bit by bit gave the layout above. Live decoding on an ESP32 then agreed with the connected `1962` reads.
 
 The raw nRF Connect session logs and the ESP32 probe output are kept privately and are not published in this repository.
