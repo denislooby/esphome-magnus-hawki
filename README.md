@@ -164,7 +164,7 @@ The component disconnects after each operation so the Magnus app can connect nor
 
 **Stale readings:**
 - Advertisements bring a new reading about once an hour, which is how often the HAWKi measures
-- The default `update_interval` of 4 hours also connects to read the cache. Each connection makes the HAWKi refresh its advertised reading every few seconds for a few minutes, so shorter intervals likely cost battery
+- The default `update_interval` of 4 hours also connects to read the cache. Each connection makes the HAWKi measure repeatedly for a few minutes, so shorter intervals cost battery. With advertisements working, `update_interval: never` avoids connections entirely
 
 **Distance shows 99999:**
 - This means the radar detected no target (empty tank or sensor not aimed correctly)

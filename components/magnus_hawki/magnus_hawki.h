@@ -56,6 +56,7 @@ class MagnusHawki : public PollingComponent,
   void parse_distance_(const uint8_t *data, uint16_t length, bool from_cache);
   void publish_distance_(float distance, const char *source);
   void publish_last_read_time_();
+  void request_connection_();
   void arm_watchdog_();
   void schedule_disconnect_();
   void do_disconnect_();
@@ -77,6 +78,7 @@ class MagnusHawki : public PollingComponent,
   float offset_{0};
   OpMode mode_{OpMode::IDLE};
   bool fresh_measure_requested_{false};
+  bool connect_requested_{false};  // Set when we enable the client; unset connections get dropped
   static const uint32_t OPERATION_TIMEOUT_MS = 300000;  // 5 minutes
 
   bool has_value_{false};       // True after first successful read

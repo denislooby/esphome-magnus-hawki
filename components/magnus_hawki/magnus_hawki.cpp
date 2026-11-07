@@ -63,7 +63,7 @@ void MagnusHawki::update() {
     this->fresh_measure_requested_ = false;
     this->mode_ = OpMode::MEASURE_CONNECT;
     this->arm_watchdog_();
-    this->parent()->set_enabled(true);
+    this->request_connection_();
     return;
   }
 
@@ -71,7 +71,7 @@ void MagnusHawki::update() {
   ESP_LOGI(TAG, "Periodic update: connecting to read cached values...");
   this->mode_ = OpMode::CACHE_CONNECT;
   this->arm_watchdog_();
-  this->parent()->set_enabled(true);
+  this->request_connection_();
 }
 
 void MagnusHawki::trigger_fresh_measurement() {
@@ -93,7 +93,7 @@ void MagnusHawki::trigger_cache_read() {
   ESP_LOGI(TAG, "Cache read requested via button");
   this->mode_ = OpMode::CACHE_CONNECT;
   this->arm_watchdog_();
-  this->parent()->set_enabled(true);
+  this->request_connection_();
 }
 
 void MagnusHawki::gattc_event_handler(esp_gattc_cb_event_t event,
@@ -101,8 +101,19 @@ void MagnusHawki::gattc_event_handler(esp_gattc_cb_event_t event,
                                        esp_ble_gattc_cb_param_t *param) {
   switch (event) {
     case ESP_GATTC_OPEN_EVT: {
-      if (param->open.status == ESP_GATT_OK) {
+      bool requested = this->connect_requested_;
+      this->connect_requested_ = false;
+      if (param->open.status == ESP_GATT_OK && !requested) {
+        // BLEClient::setup() re-enables the client after our setup(), so with auto_connect it
+        // connects at boot on its own. Nothing would ever disconnect it, blocking the Magnus app.
+        ESP_LOGD(TAG, "Connected without a pending operation, disconnecting");
+        this->parent()->set_enabled(false);
+      } else if (param->open.status == ESP_GATT_OK) {
         ESP_LOGI(TAG, "Connected to Magnus HAWKi");
+      } else if (!requested) {
+        // An unrequested auto-connect failed: nothing to retry
+        ESP_LOGD(TAG, "Unrequested connection failed, status=%d", param->open.status);
+        this->parent()->set_enabled(false);
       } else {
         ESP_LOGW(TAG, "Connection failed, status=%d", param->open.status);
         this->mode_ = OpMode::IDLE;
@@ -411,6 +422,11 @@ void MagnusHawki::publish_last_read_time_() {
   this->last_read_sensor_->publish_state(buf);
 }
 
+void MagnusHawki::request_connection_() {
+  this->connect_requested_ = true;
+  this->parent()->set_enabled(true);
+}
+
 void MagnusHawki::arm_watchdog_() {
   this->cancel_timeout("watchdog");
   this->set_timeout("watchdog", OPERATION_TIMEOUT_MS, [this]() {
@@ -433,6 +449,7 @@ void MagnusHawki::schedule_disconnect_() {
 
 void MagnusHawki::do_disconnect_() {
   this->mode_ = OpMode::IDLE;
+  this->connect_requested_ = false;
   this->parent()->set_enabled(false);
 }
 

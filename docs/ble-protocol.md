@@ -154,7 +154,7 @@ The payload is 10 bytes. BLE stacks report the first two bytes as the "company I
 Behaviour seen on one device in November 2026:
 
 - The advertisement normally carries the hourly reading. The Magnus app shows "Measurements are taken hourly".
-- After any connection (Magnus app or ESP32), the reading time advances every 5–35 seconds for about 3–4 minutes, then returns to hourly.
+- After any connection attempt (Magnus app or ESP32, even a failed one), the reading time advances every 5–35 seconds for about 3–4 minutes, then returns to hourly. The distance varied during a burst (767 → 772 → 767 mm), so these are real radar measurements.
 - The device clock ran about 7 min 20 s fast, so reading times can be slightly in the future.
 - Battery can flip by 1% between consecutive readings (81/82).
 
@@ -167,7 +167,7 @@ The two samples quoted in earlier versions of this document (`23a9da98e6ff63e002
 
 ## Reading the Last Measurement
 
-The device measures on its own schedule and stores the result in `1962`. Reading it does not explicitly start the radar, but after any connection the advertised reading refreshes every few seconds for a few minutes (see [Advertisement data](#advertisement-data)), so a connection may cause extra measurements.
+The device measures on its own schedule and stores the result in `1962`. Reading it does not explicitly start the radar, but any connection triggers a few minutes of repeated measurements (see [Advertisement data](#advertisement-data)). Connecting therefore costs battery; the advertisement carries the same reading for free.
 
 1. Connect and run service discovery
 2. Read `1962`
@@ -201,7 +201,7 @@ level_%   = oil_depth / tank_height * 100     (clamped to 0–100)
 ## Open Questions
 
 - **Unknown advertisement field** (bits 50–58): seen 0, 24, 28 and 36. Possibly temperature or a counter.
-- **Measurement bursts after connecting:** does a connection make the radar run repeatedly, and what does that cost in battery?
+- **Measurement bursts after connecting:** how much battery does a burst cost, and can it be avoided while still reading `1962`?
 - **`1930` and `1967`:** not battery. Meaning unknown.
 - **Write-only characteristics** (`1934`, `1963`, `1999`): not explored.
 - **Tank configuration** (`1990`, `1991`, `1992`, `1996`): the exact mapping to the app's settings is unconfirmed.
