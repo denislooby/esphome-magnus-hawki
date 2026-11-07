@@ -24,7 +24,9 @@ enum class OpMode {
   DISCONNECTING,    // About to disconnect
 };
 
-class MagnusHawki : public PollingComponent, public ble_client::BLEClientNode {
+class MagnusHawki : public PollingComponent,
+                    public ble_client::BLEClientNode,
+                    public esp32_ble_tracker::ESPBTDeviceListener {
  public:
   void setup() override;
   void update() override;
@@ -34,8 +36,12 @@ class MagnusHawki : public PollingComponent, public ble_client::BLEClientNode {
   void gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if,
                            esp_ble_gattc_cb_param_t *param) override;
 
+  /// Decodes the reading the HAWKi broadcasts in its advertisements (no connection needed)
+  bool parse_device(const esp32_ble_tracker::ESPBTDevice &device) override;
+
   void set_distance_sensor(sensor::Sensor *sensor) { this->distance_sensor_ = sensor; }
   void set_level_sensor(sensor::Sensor *sensor) { this->level_sensor_ = sensor; }
+  void set_battery_sensor(sensor::Sensor *sensor) { this->battery_sensor_ = sensor; }
   void set_last_read_sensor(text_sensor::TextSensor *sensor) { this->last_read_sensor_ = sensor; }
   void set_tank_height(float height) { this->tank_height_ = height; }
   void set_offset(float offset) { this->offset_ = offset; }
@@ -48,6 +54,7 @@ class MagnusHawki : public PollingComponent, public ble_client::BLEClientNode {
 
  protected:
   void parse_distance_(const uint8_t *data, uint16_t length, bool from_cache);
+  void publish_distance_(float distance, const char *source);
   void publish_last_read_time_();
   void arm_watchdog_();
   void schedule_disconnect_();
@@ -55,15 +62,16 @@ class MagnusHawki : public PollingComponent, public ble_client::BLEClientNode {
 
   sensor::Sensor *distance_sensor_{nullptr};
   sensor::Sensor *level_sensor_{nullptr};
+  sensor::Sensor *battery_sensor_{nullptr};
   text_sensor::TextSensor *last_read_sensor_{nullptr};
 
   uint16_t trigger_handle_{0};   // 1960
   uint16_t result_handle_{0};    // 2014
   uint16_t cached_handle_{0};    // 1962
   uint16_t debug_handle_{0};     // 1969
-  uint16_t batt_a_handle_{0};    // 1930 (battery candidate)
-  uint16_t batt_b_handle_{0};    // 1967 (battery candidate)
   uint8_t cache_reads_pending_{0};
+
+  uint32_t last_adv_timestamp_{0};  // Reading time of the last decoded advertisement
 
   float tank_height_{0};
   float offset_{0};

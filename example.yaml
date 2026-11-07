@@ -58,6 +58,8 @@ sensor:
       name: "Oil Tank Distance"
     level:
       name: "Oil Tank Level"
+    battery_level:
+      name: "Oil Tank Battery"
 
 text_sensor:
   - platform: magnus_hawki
